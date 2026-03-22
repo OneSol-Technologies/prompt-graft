@@ -1,0 +1,50 @@
+services:
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  proxy:
+    build: .
+    environment:
+      PG_REDIS_URL: redis://redis:6379/0
+      PG_API_KEY_SALT: devsalt
+      PG_LOG_LEVEL: debug
+      PG_DEFAULT_UPSTREAM_HOST: api.replicate.com
+      PG_DEFAULT_UPSTREAM_SCHEME: https
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redis
+
+  api:
+    build: .
+    entrypoint: ["/usr/local/bin/api"]
+    environment:
+      PG_REDIS_URL: redis://redis:6379/0
+      PG_API_KEY_SALT: devsalt
+      PG_LOG_LEVEL: debug
+    ports:
+      - "3001:3001"
+    depends_on:
+      - redis
+
+  optimizer:
+    build: .
+    entrypoint: ["/usr/local/bin/optimizer"]
+    environment:
+      PG_REDIS_URL: redis://redis:6379/0
+      PG_API_KEY_SALT: ${PG_API_KEY_SALT}
+      PG_LOG_LEVEL: ${PG_LOG_LEVEL}
+      PG_GEPA_ROLLOUT_BUDGET: ${PG_GEPA_ROLLOUT_BUDGET}
+      PG_GEPA_OUTPUT_SIZE: ${PG_GEPA_OUTPUT_SIZE}
+      PG_GEPA_TOP_N: ${PG_GEPA_TOP_N}
+      PG_OPTIMIZER_LLM_PROVIDER: ${PG_OPTIMIZER_LLM_PROVIDER}
+      PG_REPLICATE_API_TOKEN: ${PG_REPLICATE_API_TOKEN}
+      PG_REPLICATE_MODEL: ${PG_REPLICATE_MODEL}
+      PG_MIN_SAMPLES: ${PG_MIN_SAMPLES}
+      PG_OPTIMIZE_EVERY: ${PG_OPTIMIZE_EVERY}
+      PG_GEPA_CROSSOVER: ${PG_GEPA_CROSSOVER}
+      PG_MAX_VARIANT_AGE: ${PG_MAX_VARIANT_AGE}
+    depends_on:
+      - redis

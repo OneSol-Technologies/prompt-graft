@@ -1,0 +1,176 @@
+package optimizer
+
+import (
+    "context"
+    "encoding/json"
+    "strconv"
+    "strings"
+
+    "promptguru/internal/config"
+    "promptguru/internal/logging"
+    "promptguru/internal/optimizer/gepa"
+    "promptguru/internal/store"
+)
+
+type Driver struct {
+    store store.Store
+    cfg   *config.Config
+    llm   gepa.LLMClient
+    log   *logging.Logger
+}
+
+func NewDriver(st store.Store, cfg *config.Config, llm gepa.LLMClient, log *logging.Logger) *Driver {
+    return &Driver{store: st, cfg: cfg, llm: llm, log: log}
+}
+
+func (d *Driver) RunOnce(ctx context.Context) {
+    refs, err := d.store.ReadySessions(ctx, d.cfg.MinSamples, d.cfg.OptimizeEvery)
+    if err != nil {
+        d.log.Warnf("ready sessions scan failed: %v", err)
+        return
+    }
+    if len(refs) == 0 {
+        d.log.Debugf("optimizer: no sessions ready yet (need at least %d rated requests per session)", d.cfg.MinSamples)
+        return
+    }
+
+    for _, ref := range refs {
+        d.log.Debugf("optimizer: session=%s keyHash=%s", ref.SessionID, ref.KeyHash)
+
+        samples, err := d.store.LoadConversationSamples(ctx, ref.KeyHash, ref.SessionID, d.cfg.GEPATopN)
+        if err != nil {
+            d.log.Warnf("load samples failed: %v", err)
+            continue
+        }
+        if len(samples) == 0 {
+            d.log.Debugf("optimizer: no conversation samples found")
+            continue
+        }
+
+        if allPositive(samples) {
+            d.log.Debugf("optimizer: all samples positive, skipping")
+            _ = d.store.RollupConversationFeedback(ctx, ref.KeyHash, ref.SessionID)
+            _ = d.store.MarkSessionOptimized(ctx, ref.KeyHash, ref.SessionID)
+            continue
+        }
+
+        analysisPrompt := buildAnalysisPrompt(samples)
+        analysis, err := d.llm.Complete(ctx, "You are a prompt optimization expert.", analysisPrompt)
+        if err != nil {
+            d.log.Warnf("analysis call failed: %v", err)
+            continue
+        }
+
+        generationPrompt := buildGenerationPrompt(analysis, d.cfg.GEPAOutputSize)
+        raw, err := d.llm.Complete(ctx, "You are a prompt optimization expert.", generationPrompt)
+        if err != nil {
+            d.log.Warnf("generation call failed: %v", err)
+            continue
+        }
+
+        candidates := parseCandidates(raw)
+        if len(candidates) == 0 {
+            d.log.Warnf("no candidates produced")
+            continue
+        }
+        if len(candidates) > d.cfg.GEPAOutputSize {
+            candidates = candidates[:d.cfg.GEPAOutputSize]
+        }
+
+        result := &gepa.Result{
+            Candidates: make([]*gepa.Candidate, 0, len(candidates)),
+        }
+        for _, c := range candidates {
+            result.Candidates = append(result.Candidates, &gepa.Candidate{Prompt: c})
+        }
+        if len(result.Candidates) > 0 {
+            result.Best = result.Candidates[0]
+        }
+
+        if err := d.store.RollupConversationFeedback(ctx, ref.KeyHash, ref.SessionID); err != nil {
+            d.log.Warnf("rollup failed: %v", err)
+        }
+
+        promoter := NewPromoter(d.store, d.cfg, d.log)
+        if err := promoter.Promote(ctx, ref.KeyHash, ref.SessionID, result); err != nil {
+            d.log.Warnf("promote failed: %v", err)
+            continue
+        }
+        _ = d.store.MarkSessionOptimized(ctx, ref.KeyHash, ref.SessionID)
+    }
+}
+
+func allPositive(samples []store.ConversationFeedback) bool {
+    if len(samples) == 0 {
+        return false
+    }
+    for _, s := range samples {
+        if s.Score != 1 {
+            return false
+        }
+    }
+    return true
+}
+
+func buildAnalysisPrompt(samples []store.ConversationFeedback) string {
+    var b strings.Builder
+    b.WriteString("You are analyzing prompt performance. Below are prompt/response pairs with scores (-1,0,1). For each, explain what worked and what failed. Provide a concise summary of improvements.\\n\\n")
+    for i, s := range samples {
+        b.WriteString("Sample ")
+        b.WriteString(intToString(i + 1))
+        b.WriteString("\\nPROMPT:\\n")
+        b.WriteString(s.Prompt)
+        b.WriteString("\\nRESPONSE:\\n")
+        if s.Response != "" {
+            b.WriteString(s.Response)
+        } else {
+            b.WriteString(s.Prompt)
+        }
+        b.WriteString("\\nSCORE: ")
+        b.WriteString(intToString(s.Score))
+        b.WriteString("\\n\\n")
+    }
+    b.WriteString("Summarize what works and what to improve. Return bullet points.")
+    return b.String()
+}
+
+func buildGenerationPrompt(analysis string, outputSize int) string {
+    var b strings.Builder
+    b.WriteString("Using the analysis below, generate ")
+    b.WriteString(intToString(outputSize))
+    b.WriteString(" improved system prompts. Output ONLY a JSON array of strings.\\n\\nANALYSIS:\\n")
+    b.WriteString(analysis)
+    return b.String()
+}
+
+func parseCandidates(raw string) []string {
+    raw = strings.TrimSpace(raw)
+    if raw == "" {
+        return nil
+    }
+    if strings.HasPrefix(raw, "[") {
+        var out []string
+        if json.Unmarshal([]byte(raw), &out) == nil {
+            return cleanCandidates(out)
+        }
+    }
+    lines := strings.Split(raw, "\\n")
+    return cleanCandidates(lines)
+}
+
+func cleanCandidates(list []string) []string {
+    out := make([]string, 0, len(list))
+    for _, s := range list {
+        s = strings.TrimSpace(s)
+        s = strings.TrimPrefix(s, "-")
+        s = strings.TrimSpace(s)
+        if s != "" {
+            out = append(out, s)
+        }
+    }
+    return out
+}
+
+func intToString(v int) string {
+    return strconv.Itoa(v)
+}
