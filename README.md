@@ -80,30 +80,6 @@ curl -s -X POST \
   http://localhost:3001/feedback/demo-session-1
 ```
 
-## Inspect Session and Variants
-
-```bash
-curl -s http://localhost:3001/sessions/demo-session-1
-```
-
-```bash
-curl -s http://localhost:3001/variants/demo-session-1
-```
-
-## Manual Optimizer Run
-
-If you want manual control, start the optimizer via the `manual` profile:
-
-```bash
-docker compose --profile manual up --build optimizer
-```
-
-The optimizer logs:
-- how many samples it selected
-- the inferred system prompt template
-- the analysis output
-- the generated candidate prompts
-
 ## Notes
 
 - The proxy extracts system prompts from JSON payloads using provider adapters.
