@@ -31,6 +31,19 @@ docker compose --profile manual up --build optimizer
   - `X-PG-Variant-Id` (only when a variant is applied)
 - Feedback is posted to the API and is later used by the optimizer to produce new variants.
 
+## API Directory
+
+Proxy (port 8080):
+1. `POST /` (or any path) — forwards the request to the upstream provider and logs the interaction.
+
+Feedback API (port 3001):
+1. `POST /feedback/:sessionId` — submit feedback for a session (headers can target a specific conversation/variant).
+2. `GET /sessions/:sessionId` — view session summary and latest prompt/feedback info.
+3. `GET /variants/:sessionId` — view current variants, best prompt, and history.
+
+Optimizer:
+1. `docker compose --profile manual up --build optimizer` — runs a manual optimization cycle.
+
 ## Proxy Request Example (Replicate, wait for result)
 
 This forwards directly to Replicate and waits for the final response.
@@ -48,6 +61,25 @@ curl -s -X POST \
     }
   }' \
   http://localhost:8080
+```
+
+## Proxy Request Example (OpenAI-Style Chat via Bedrock)
+
+```bash
+curl -s --location 'http://localhost:8080' \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $BEDROCK_API_TOKEN" \
+  -H "X-PG-Api-Style: openai-chat" \
+  -H "X-PG-Session: bedrock-test-1" \
+  -H "X-PG-Upstream-Url: https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1/chat/completions" \
+  -d '{
+    "model": "openai.gpt-oss-20b-1:0",
+    "messages": [
+      { "role": "user", "content": "Explain AI in simple terms" }
+    ],
+    "max_tokens": 200,
+    "temperature": 0.7
+  }'
 ```
 
 ## Second Request (Same Session)
@@ -74,15 +106,22 @@ Feedback is tied to the session. If you have the `X-PG-Conversation-Id` or `X-PG
 ```bash
 curl -s -X POST \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $YOUR_API_TOKEN" \
   -H "X-PG-Conversation-Id: <conversation_id_from_proxy_response>" \
   -H "X-PG-Variant-Id: <variant_id_from_proxy_response>" \
   -d '{"rating": 1}' \
   http://localhost:3001/feedback/demo-session-1
 ```
 
+## API Styles (X-PG-Api-Style)
+
+Available styles:
+1. `replicate` — expects `input.prompt`
+2. `openai-chat` — expects `messages[0].content` and concatenates `choices[].message.content`
+3. `generic` — passthrough (no prompt extraction)
+
 ## Notes
 
 - The proxy extracts system prompts from JSON payloads using provider adapters.
 - Optimization runs asynchronously and never blocks the proxy request path.
 - Response text is captured (when text/JSON) to improve prompt reflection.
-
