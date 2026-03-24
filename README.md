@@ -10,16 +10,10 @@ Prompt Graft is a Go reverse proxy that logs AI requests, injects prompt variant
 cp .env.example .env
 ```
 
-2. Start Redis + proxy + API (optimizer optional):
+2. Start Redis + proxy + API + optimizer:
 
 ```bash
 docker compose up --build
-```
-
-3. (Optional) Run optimizer manually when you want:
-
-```bash
-docker compose --profile manual up --build optimizer
 ```
 
 ## How It Works (High Level)
