@@ -24,16 +24,16 @@ type Handler struct {
 	cfg       *config.Config
 	store     store.Store
 	registry  *provider.Registry
+	styles    *provider.StyleRegistry
 	forwarder *Forwarder
 	log       *logging.Logger
 }
 
 // NewHandler wires the proxy handler with config, store, provider registry, forwarder, and logger.
-func NewHandler(cfg *config.Config, st store.Store, reg *provider.Registry, fwd *Forwarder, log *logging.Logger) *Handler {
-	return &Handler{cfg: cfg, store: st, registry: reg, forwarder: fwd, log: log}
+func NewHandler(cfg *config.Config, st store.Store, reg *provider.Registry, styles *provider.StyleRegistry, fwd *Forwarder, log *logging.Logger) *Handler {
+	return &Handler{cfg: cfg, store: st, registry: reg, styles: styles, forwarder: fwd, log: log}
 }
 
-// ServeHTTP handles a single proxy request: buffer/stream body, optionally inject variant prompt, forward upstream, stream response, and log.
 // ServeHTTP handles a single proxy request: buffer/stream body, optionally inject variant prompt, forward upstream, stream response, and log.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), h.cfg.RequestTimeout)
@@ -51,7 +51,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		lookupHost = r.Host
 	}
 
+	apiStyle := strings.ToLower(strings.TrimSpace(r.Header.Get("X-PG-Api-Style")))
 	adapter := h.registry.Lookup(lookupHost)
+	if apiStyle != "" && h.styles != nil {
+		adapter = h.styles.Lookup(apiStyle)
+		h.log.Debugf("api style override=%s adapter=%s", apiStyle, adapter.Name())
+	}
+
 	keyHash := hash.APIKey(h.cfg.APIKeySalt, r.Header.Get("Authorization"))
 	sessionID := r.Header.Get("X-PG-Session")
 	if sessionID == "" {
@@ -163,7 +169,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.log.Debugf("response body=%s", resBuf.String())
 	}
 
-	responseText := extractTextOutput(resp.Header.Get("Content-Type"), resBuf.Bytes())
+	responseText := ""
+	if apiStyle != "" {
+		if text, err := adapter.ExtractOutputText(resp.Header.Get("Content-Type"), resBuf.Bytes()); err == nil {
+			responseText = text
+		} else {
+			h.log.Warnf("extract output failed: %v", err)
+		}
+	} else {
+		responseText = extractTextOutput(resp.Header.Get("Content-Type"), resBuf.Bytes())
+	}
+
 	if responseText != "" {
 		h.log.Debugf("response text=%s", snippetString(responseText, 400))
 	}
