@@ -47,6 +47,7 @@ curl -s -X POST \
   -H "Authorization: Bearer $REPLICATE_API_TOKEN" \
   -H "Content-Type: application/json" \
   -H "Prefer: wait" \
+  -H "X-PG-Api-Style: replicate" \
   -H "X-PG-Session: demo-session-1" \
   -H "X-PG-Upstream-Url: https://api.replicate.com/v1/models/google/gemini-3.1-pro/predictions" \
   -d '{
@@ -83,6 +84,7 @@ curl -s -X POST \
   -H "Authorization: Bearer $REPLICATE_API_TOKEN" \
   -H "Content-Type: application/json" \
   -H "Prefer: wait" \
+  -H "X-PG-Api-Style: replicate" \
   -H "X-PG-Session: demo-session-1" \
   -H "X-PG-Upstream-Url: https://api.replicate.com/v1/models/google/gemini-3.1-pro/predictions" \
   -d '{
