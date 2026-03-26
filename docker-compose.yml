@@ -1,39 +1,69 @@
+name: prompt-graft
+
 services:
   redis:
     image: redis:7
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: ${PG_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${PG_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${PG_POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   proxy:
     build: .
     environment:
-      PG_REDIS_URL: redis://redis:6379/0
-      PG_API_KEY_SALT: devsalt
-      PG_LOG_LEVEL: debug
+      PG_REDIS_URL: ${PG_REDIS_URL}
+      PG_DATABASE_URL: ${PG_DATABASE_URL}
+      PG_API_KEY_SALT: ${PG_API_KEY_SALT}
+      PG_LOG_LEVEL: ${PG_LOG_LEVEL}
       PG_DEFAULT_UPSTREAM_HOST: api.replicate.com
       PG_DEFAULT_UPSTREAM_SCHEME: https
     ports:
       - "8080:8080"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
 
   api:
     build: .
     entrypoint: ["/usr/local/bin/api"]
     environment:
-      PG_REDIS_URL: redis://redis:6379/0
-      PG_API_KEY_SALT: devsalt
-      PG_LOG_LEVEL: debug
+      PG_REDIS_URL: ${PG_REDIS_URL}
+      PG_DATABASE_URL: ${PG_DATABASE_URL}
+      PG_API_KEY_SALT: ${PG_API_KEY_SALT}
+      PG_LOG_LEVEL: ${PG_LOG_LEVEL}
     ports:
       - "3001:3001"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
 
   optimizer:
     build: .
     entrypoint: ["/usr/local/bin/optimizer"]
     environment:
-      PG_REDIS_URL: redis://redis:6379/0
+      PG_REDIS_URL: ${PG_REDIS_URL}
+      PG_DATABASE_URL: ${PG_DATABASE_URL}
       PG_API_KEY_SALT: ${PG_API_KEY_SALT}
       PG_LOG_LEVEL: ${PG_LOG_LEVEL}
       PG_GEPA_ROLLOUT_BUDGET: ${PG_GEPA_ROLLOUT_BUDGET}
@@ -46,5 +76,10 @@ services:
       PG_OPTIMIZE_EVERY: ${PG_OPTIMIZE_EVERY}
       PG_GEPA_CROSSOVER: ${PG_GEPA_CROSSOVER}
       PG_MAX_VARIANT_AGE: ${PG_MAX_VARIANT_AGE}
+      PG_VARIANT_UNUSED_TTL: ${PG_VARIANT_UNUSED_TTL:-48h}
+      PG_JANITOR_INTERVAL: ${PG_JANITOR_INTERVAL:-1h}
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy

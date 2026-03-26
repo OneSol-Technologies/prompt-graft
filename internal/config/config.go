@@ -12,7 +12,8 @@ type Config struct {
     RedisTimeout   time.Duration
     MaxBufferBytes int
 
-    RedisURL string
+    RedisURL    string
+    DatabaseURL string
 
     MinSamples        int
     OptimizeEvery     time.Duration
@@ -22,6 +23,9 @@ type Config struct {
     GEPATopN          int
     GEPAOutputSize    int
     GEPACrossover     bool
+
+    VariantUnusedTTL time.Duration
+    JanitorInterval  time.Duration
 
     OptimizerLLMProvider string
     OptimizerLLMModel    string
@@ -54,7 +58,8 @@ func Load() *Config {
         RedisTimeout:   getDuration("PG_REDIS_TIMEOUT", 8*time.Millisecond),
         MaxBufferBytes: getInt("PG_MAX_BUFFER_BYTES", 524288),
 
-        RedisURL: getEnv("PG_REDIS_URL", ""),
+        RedisURL:    getEnv("PG_REDIS_URL", ""),
+        DatabaseURL: getEnv("PG_DATABASE_URL", ""),
 
         MinSamples:        getInt("PG_MIN_SAMPLES", 20),
         OptimizeEvery:     getDuration("PG_OPTIMIZE_EVERY", 6*time.Hour),
@@ -64,6 +69,9 @@ func Load() *Config {
         GEPATopN:          getInt("PG_GEPA_TOP_N", 3),
         GEPAOutputSize:    getInt("PG_GEPA_OUTPUT_SIZE", 3),
         GEPACrossover:     getBool("PG_GEPA_CROSSOVER", true),
+
+        VariantUnusedTTL: getDuration("PG_VARIANT_UNUSED_TTL", 48*time.Hour),
+        JanitorInterval:  getDuration("PG_JANITOR_INTERVAL", time.Hour),
 
         OptimizerLLMProvider: getEnv("PG_OPTIMIZER_LLM_PROVIDER", "replicate"),
         OptimizerLLMModel:    getEnv("PG_OPTIMIZER_LLM_MODEL", "openai/gpt-5.4"),

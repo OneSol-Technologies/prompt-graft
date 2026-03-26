@@ -45,3 +45,9 @@ func (s *Store) SetSessionPrompt(ctx context.Context, keyHash, sessionID, prompt
     }
     return s.redis().Set(ctx, store.KeySessionPrompt(keyHash, sessionID), prompt, ttl).Err()
 }
+
+// DeleteVariants removes the variant cache key for a session.
+// Not part of store.Store; called directly by the janitor.
+func (s *Store) DeleteVariants(ctx context.Context, keyHash, sessionID string) error {
+    return s.redis().Del(ctx, store.KeyVariants(keyHash, sessionID)).Err()
+}

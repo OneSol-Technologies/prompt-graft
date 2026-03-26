@@ -5,6 +5,7 @@ import (
 
 	"promptguru/internal/config"
 	"promptguru/internal/logging"
+	"promptguru/internal/middleware"
 	"promptguru/internal/provider"
 	"promptguru/internal/provider/generic"
 	"promptguru/internal/provider/openaichat"
@@ -30,6 +31,6 @@ func NewServer(cfg *config.Config, st store.Store, log *logging.Logger) *http.Se
 
 	return &http.Server{
 		Addr:    cfg.ProxyAddr,
-		Handler: handler,
+		Handler: middleware.CORS(handler),
 	}
 }
