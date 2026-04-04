@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS feedback_events (
     conversation_id TEXT        NOT NULL,
     variant_id      TEXT,
     rating          INT         NOT NULL,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    times_used      INT         NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_feedback_session
     ON feedback_events (key_hash, session_id);
@@ -66,3 +67,27 @@ CREATE TABLE IF NOT EXISTS prompt_history (
 );
 CREATE INDEX IF NOT EXISTS idx_history_session
     ON prompt_history (key_hash, session_id, promoted_at DESC);
+
+-- Conversation logs copied from Redis by the janitor.
+-- One row per (session, conversation); UNIQUE prevents double-insertion.
+CREATE TABLE IF NOT EXISTS conversation_logs (
+    id              BIGSERIAL   PRIMARY KEY,
+    key_hash        TEXT        NOT NULL,
+    session_id      TEXT        NOT NULL,
+    conversation_id TEXT        NOT NULL,
+    variant_id      TEXT,
+    prompt          TEXT,
+    response_text   TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (key_hash, session_id, conversation_id)
+);
+CREATE INDEX IF NOT EXISTS idx_convlogs_session
+    ON conversation_logs (key_hash, session_id);
+
+-- Per-session optimizer state (last optimized timestamp).
+CREATE TABLE IF NOT EXISTS session_metadata (
+    key_hash       TEXT        NOT NULL,
+    session_id     TEXT        NOT NULL,
+    last_optimized TIMESTAMPTZ,
+    PRIMARY KEY (key_hash, session_id)
+);

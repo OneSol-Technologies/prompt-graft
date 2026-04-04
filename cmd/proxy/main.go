@@ -38,12 +38,12 @@ func main() {
 					if migrateErr := pgClient.Migrate(context.Background()); migrateErr != nil {
 						log.Warnf("postgres migration failed: %v", migrateErr)
 					}
-					pgStore = pgstore.NewStore(pgClient)
+					pgStore = pgstore.NewStore(pgClient, log)
 					log.Infof("proxy: postgres connected")
 				}
 			}
 
-			st = layeredstore.New(rstore, pgStore, log)
+			st = layeredstore.New(rstore, pgStore, log, cfg)
 		}
 	}
 

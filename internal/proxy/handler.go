@@ -92,12 +92,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.log.Debugf("session_id=%s prompt_snippet=%q", sessionID, promptSnippet)
+	h.log.Infof("proxy: request session=%s prompt_snippet=%q", sessionID, promptSnippet)
 
-	varCtx, varCancel := context.WithTimeout(ctx, h.cfg.RedisTimeout)
+	// context for forward pass and store lookup
+	varCtx, varCancel := context.WithTimeout(ctx, h.cfg.ForwardPassTimeout)
 	if h.store != nil {
 		if variant, err := h.store.GetVariant(varCtx, keyHash, sessionID); err == nil && variant != nil {
-			h.log.Debugf("variant set found count=%d", len(variant.Variants))
+			h.log.Debugf("proxy: variant set found session=%s count=%d", sessionID, len(variant.Variants))
 			if len(buffered) > 0 && prompt != "" {
 				chosen := pickWeightedRandom(variant.Variants)
 				if chosen.ID != "" {
@@ -112,23 +113,27 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 							variantID = chosen.ID
 							prompt = newPrompt
 							promptSnippet = snippetString(newPrompt, 400)
-							h.log.Debugf("applied variant_id=%s segment=%q", variantID, segment)
+							h.log.Infof("proxy: injected variant_id=%s session=%s segment=%q", variantID, sessionID, segment)
 						} else {
 							h.log.Warnf("inject prompt failed: %v", err)
 						}
 					}
 				}
 			}
-		} else if err != nil {
-			h.log.Debugf("variant lookup error: %v", err)
+		} else {
+			if err != nil {
+				h.log.Warnf("proxy: variant lookup error session=%s: %v — using baseline", sessionID, err)
+			} else {
+				h.log.Infof("proxy: no active variant for session=%s — using baseline prompt", sessionID)
+			}
 		}
 	} else {
-		h.log.Debugf("store disabled; skipping variant lookup")
+		h.log.Debugf("proxy: store disabled — using baseline prompt")
 	}
 	varCancel()
 
 	conversationID := conversationID(prompt)
-	h.log.Debugf("variant_id=%s conversation_id=%s", variantID, conversationID)
+	h.log.Infof("proxy: forwarding session=%s variant_id=%q conversation_id=%s", sessionID, variantID, conversationID)
 	if len(injectedBody) > 0 {
 		h.log.Debugf("outgoing body=%s", string(injectedBody))
 	}
@@ -152,7 +157,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	h.log.Debugf("upstream response status=%d headers=%s", resp.StatusCode, safeHeaderDump(resp.Header))
+	h.log.Infof("proxy: upstream response session=%s status=%d", sessionID, resp.StatusCode)
 
 	copyHeaders(w.Header(), resp.Header)
 	w.Header().Set("X-PG-Session-Id", sessionID)

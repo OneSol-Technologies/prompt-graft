@@ -25,6 +25,7 @@ func NewDriver(st store.Store, cfg *config.Config, llm gepa.LLMClient, log *logg
 
 func (d *Driver) RunOnce(ctx context.Context) {
 	refs, err := d.store.ReadySessions(ctx, d.cfg.MinSamples, d.cfg.OptimizeEvery)
+
 	if err != nil {
 		d.log.Warnf("ready sessions scan failed: %v", err)
 		return
@@ -33,23 +34,24 @@ func (d *Driver) RunOnce(ctx context.Context) {
 		d.log.Debugf("optimizer: no sessions ready yet (need at least %d rated requests per session)", d.cfg.MinSamples)
 		return
 	}
+	d.log.Infof("optimizer: %d session(s) ready for optimization", len(refs))
 
 	for _, ref := range refs {
-		d.log.Debugf("optimizer: session=%s keyHash=%s", ref.SessionID, ref.KeyHash)
+		d.log.Infof("optimizer: processing session=%s keyHash=%s", ref.SessionID, ref.KeyHash)
 
 		samples, err := d.store.LoadConversationSamples(ctx, ref.KeyHash, ref.SessionID, d.cfg.GEPATopN)
 		if err != nil {
 			d.log.Warnf("load samples failed: %v", err)
 			continue
 		}
-		d.log.Debugf("optimizer: selected samples=%d (perVariant=%d)", len(samples), d.cfg.GEPATopN)
+		d.log.Infof("optimizer: session=%s loaded %d sample(s) (perVariant=%d)", ref.SessionID, len(samples), d.cfg.GEPATopN)
 		for i, s := range samples {
 			prompt := truncateString(s.Prompt, 400)
 			response := truncateString(s.Response, 400)
 			d.log.Debugf("optimizer: sample[%d] variant=%s score=%d prompt=%q response=%q", i, s.VariantID, s.Score, prompt, response)
 		}
 		if len(samples) == 0 {
-			d.log.Debugf("optimizer: no conversation samples found")
+			d.log.Infof("optimizer: session=%s — no conversation samples found (history not yet copied to pg?), skipping", ref.SessionID)
 			continue
 		}
 
@@ -66,7 +68,7 @@ func (d *Driver) RunOnce(ctx context.Context) {
 		}
 
 		if allPositive(samples) {
-			d.log.Debugf("optimizer: all samples positive, skipping")
+			d.log.Infof("optimizer: session=%s — all samples positive, marking optimized and skipping generation", ref.SessionID)
 			_ = d.store.RollupConversationFeedback(ctx, ref.KeyHash, ref.SessionID)
 			_ = d.store.MarkSessionOptimized(ctx, ref.KeyHash, ref.SessionID)
 			continue
@@ -92,15 +94,18 @@ func (d *Driver) RunOnce(ctx context.Context) {
 
 		candidates := parseCandidates(raw)
 		if len(candidates) == 0 {
-			d.log.Warnf("no candidates produced")
+			d.log.Warnf("optimizer: session=%s — no candidates produced from LLM output", ref.SessionID)
 			continue
 		}
 		if len(candidates) > d.cfg.GEPAOutputSize {
 			candidates = candidates[:d.cfg.GEPAOutputSize]
 		}
+		d.log.Infof("optimizer: session=%s — generated %d candidate(s)", ref.SessionID, len(candidates))
 		for i, c := range candidates {
 			d.log.Debugf("optimizer: candidate[%d]=%q", i, c)
 		}
+
+		d.store.MarkFeedbackUsed(ctx, ref.KeyHash, ref.SessionID, extractConversationIDs(samples))
 
 		result := &gepa.Result{
 			Candidates: make([]*gepa.Candidate, 0, len(candidates)),
@@ -118,11 +123,20 @@ func (d *Driver) RunOnce(ctx context.Context) {
 
 		promoter := NewPromoter(d.store, d.cfg, d.log)
 		if err := promoter.Promote(ctx, ref.KeyHash, ref.SessionID, result); err != nil {
-			d.log.Warnf("promote failed: %v", err)
+			d.log.Warnf("optimizer: session=%s promote failed: %v", ref.SessionID, err)
 			continue
 		}
+		d.log.Infof("optimizer: session=%s — optimization complete, promoted %d variant(s)", ref.SessionID, len(candidates))
 		_ = d.store.MarkSessionOptimized(ctx, ref.KeyHash, ref.SessionID)
 	}
+}
+
+func extractConversationIDs(samples []store.ConversationFeedback) []string {
+	ids := make([]string, 0, len(samples))
+	for _, s := range samples {
+		ids = append(ids, s.ConversationID)
+	}
+	return ids
 }
 
 func allPositive(samples []store.ConversationFeedback) bool {

@@ -438,4 +438,17 @@ func selectBalanced(list []store.ConversationFeedback, n int) []store.Conversati
 	return out
 }
 
+func (s *Store) MarkFeedbackUsed(ctx context.Context, keyHash string, sessionID string, conversationIDs []string) error {
+	if len(conversationIDs) == 0 {
+		return nil
+	}
+	pipe := s.redis().Pipeline()
+	for _, convID := range conversationIDs {
+		key := store.KeyConversationFeedback(keyHash, sessionID, convID)
+		pipe.HDel(ctx, key)
+	}
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
 var _ store.Store = (*Store)(nil)

@@ -34,6 +34,9 @@ services:
       PG_LOG_LEVEL: ${PG_LOG_LEVEL}
       PG_DEFAULT_UPSTREAM_HOST: api.replicate.com
       PG_DEFAULT_UPSTREAM_SCHEME: https
+      PG_REQUEST_TIMEOUT: ${PG_REQUEST_TIMEOUT}
+      PG_REDIS_TIMEOUT: ${PG_REDIS_TIMEOUT}
+      PG_FORWARD_PASS_TIMEOUT: ${PG_FORWARD_PASS_TIMEOUT}
     ports:
       - "8080:8080"
     depends_on:

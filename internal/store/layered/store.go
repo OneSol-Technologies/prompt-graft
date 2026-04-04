@@ -3,9 +3,10 @@
 //
 // Read strategy:  Redis first → Postgres fallback → re-warm Redis on hit.
 // Write strategy: Redis (authoritative for hot path) + Postgres (durable).
-//                 Postgres write failures are logged but never returned to the
-//                 caller so that Redis unavailability or Postgres downtime never
-//                 blocks the proxy or optimizer.
+//
+//	Postgres write failures are logged but never returned to the
+//	caller so that Redis unavailability or Postgres downtime never
+//	blocks the proxy or optimizer.
 //
 // Methods that are purely ephemeral (logs, session-feedback scan, dataset
 // loading) are delegated to Redis only.
@@ -15,23 +16,26 @@ import (
 	"context"
 	"time"
 
+	"promptguru/internal/config"
 	"promptguru/internal/logging"
 	"promptguru/internal/optimizer/gepa"
 	"promptguru/internal/store"
 	pgstore "promptguru/internal/store/pg"
+	redisstore "promptguru/internal/store/redis"
 )
 
 // Store composes a Redis store.Store and a *pgstore.Store.
 type Store struct {
-	redis store.Store
+	cfg   *config.Config
+	redis *redisstore.Store
 	pg    *pgstore.Store
 	log   *logging.Logger
 }
 
 // New returns a layered Store.  pg may be nil; in that case all Postgres
 // operations are silently skipped and the layer degrades to Redis-only.
-func New(redis store.Store, pg *pgstore.Store, log *logging.Logger) *Store {
-	return &Store{redis: redis, pg: pg, log: log}
+func New(redis *redisstore.Store, pg *pgstore.Store, log *logging.Logger, cfg *config.Config) *Store {
+	return &Store{cfg: cfg, redis: redis, pg: pg, log: log}
 }
 
 // ---------------------------------------------------------------------------
@@ -39,22 +43,29 @@ func New(redis store.Store, pg *pgstore.Store, log *logging.Logger) *Store {
 // ---------------------------------------------------------------------------
 
 func (s *Store) GetVariant(ctx context.Context, keyHash, sessionID string) (*store.VariantSet, error) {
-	vs, err := s.redis.GetVariant(ctx, keyHash, sessionID)
+	redisCtx, redisCancel := context.WithTimeout(ctx, s.cfg.RedisTimeout)
+	vs, err := s.redis.GetVariant(redisCtx, keyHash, sessionID)
+	redisCancel()
+
 	if err == nil && vs != nil {
+		s.log.Debugf("layered: GetVariant session=%s → Redis HIT (%d variant(s))", sessionID, len(vs.Variants))
 		return vs, nil
 	}
+	s.log.Debugf("layered: GetVariant session=%s → Redis MISS (err=%v)", sessionID, err)
 
 	if s.pg == nil {
+		s.log.Debugf("layered: GetVariant session=%s → no Postgres configured, returning nil", sessionID)
 		return nil, err
 	}
 
 	// Cache miss — try Postgres.
 	vs, pgErr := s.pg.GetActiveVariants(ctx, keyHash, sessionID)
 	if pgErr != nil {
-		s.log.Warnf("layered: pg GetActiveVariants: %v", pgErr)
-		return nil, err // return original Redis error
+		s.log.Warnf("layered: GetVariant session=%s → pg error: %v", sessionID, pgErr)
+		return nil, err
 	}
 	if vs == nil {
+		s.log.Infof("layered: GetVariant session=%s → pg returned NO active variants (likely retired by janitor or never set) — proxy will use baseline", sessionID)
 		return nil, err
 	}
 
@@ -63,8 +74,10 @@ func (s *Store) GetVariant(ctx context.Context, keyHash, sessionID string) (*sto
 	if ttl < time.Minute {
 		ttl = time.Minute
 	}
+	s.log.Infof("layered: GetVariant session=%s → pg HIT (%d variant(s)), re-warming Redis ttl=%s",
+		sessionID, len(vs.Variants), ttl)
 	if rewarmErr := s.redis.SetVariants(ctx, keyHash, sessionID, vs.Variants, ttl); rewarmErr != nil {
-		s.log.Warnf("layered: redis rewarm SetVariants: %v", rewarmErr)
+		s.log.Warnf("layered: GetVariant session=%s → Redis rewarm failed: %v", sessionID, rewarmErr)
 	}
 	return vs, nil
 }
@@ -134,32 +147,26 @@ func (s *Store) GetSessionInfo(ctx context.Context, keyHash, sessionID string) (
 }
 
 func (s *Store) GetVariantsInfo(ctx context.Context, keyHash, sessionID string) (*store.VariantsInfo, error) {
-	info, err := s.redis.GetVariantsInfo(ctx, keyHash, sessionID)
-	if err != nil {
-		return nil, err
-	}
+	info := &store.VariantsInfo{SessionID: sessionID}
 
-	if s.pg == nil {
-		return info, nil
-	}
-
-	// Fill in any gaps from Postgres (cold Redis after restart).
-	if len(info.Variants) == 0 {
+	if s.pg != nil {
+		// Read variants, best prompt, and history directly from Postgres.
 		if vs, pgErr := s.pg.GetActiveVariants(ctx, keyHash, sessionID); pgErr == nil && vs != nil {
 			info.Variants = vs.Variants
 		}
-	}
-	if info.BestPrompt == nil {
 		if best, pgErr := s.pg.GetBestPrompt(ctx, keyHash, sessionID); pgErr == nil && best != nil {
 			info.BestPrompt = best
 		}
-	}
-	if len(info.History) == 0 {
 		if hist, pgErr := s.pg.GetHistory(ctx, keyHash, sessionID, 50); pgErr == nil {
 			info.History = hist
 		}
+		s.log.Debugf("layered: GetVariantsInfo session=%s → pg variants=%d bestPrompt=%t history=%d",
+			sessionID, len(info.Variants), info.BestPrompt != nil, len(info.History))
+		return info, nil
 	}
-	return info, nil
+
+	// Fallback: Redis only.
+	return s.redis.GetVariantsInfo(ctx, keyHash, sessionID)
 }
 
 func (s *Store) GetVariantFeedback(ctx context.Context, keyHash, sessionID, variantID string) (store.FeedbackSummary, error) {
@@ -209,10 +216,13 @@ func (s *Store) LogResponse(ctx context.Context, keyHash, sessionID, variantID, 
 }
 
 // ---------------------------------------------------------------------------
-// Optimizer reads — Redis only.
+// Optimizer reads — Postgres primary, Redis fallback when pg unavailable.
 // ---------------------------------------------------------------------------
 
 func (s *Store) ReadySessions(ctx context.Context, minSamples int, optimizeEvery time.Duration) ([]store.SessionRef, error) {
+	if s.pg != nil {
+		return s.pg.ReadySessions(ctx, minSamples, optimizeEvery)
+	}
 	return s.redis.ReadySessions(ctx, minSamples, optimizeEvery)
 }
 
@@ -221,6 +231,15 @@ func (s *Store) LoadDataset(ctx context.Context, keyHash, sessionID string) (gep
 }
 
 func (s *Store) LoadConversationSamples(ctx context.Context, keyHash, sessionID string, perVariant int) ([]store.ConversationFeedback, error) {
+	if s.pg != nil {
+		samples, err := s.pg.LoadConversationSamples(ctx, keyHash, sessionID, perVariant)
+		if err != nil {
+			s.log.Warnf("layered: pg LoadConversationSamples session=%s: %v — falling back to Redis", sessionID, err)
+		} else {
+			s.log.Debugf("layered: LoadConversationSamples session=%s → pg returned %d sample(s)", sessionID, len(samples))
+			return samples, nil
+		}
+	}
 	return s.redis.LoadConversationSamples(ctx, keyHash, sessionID, perVariant)
 }
 
@@ -229,7 +248,26 @@ func (s *Store) RollupConversationFeedback(ctx context.Context, keyHash, session
 }
 
 func (s *Store) MarkSessionOptimized(ctx context.Context, keyHash, sessionID string) error {
-	return s.redis.MarkSessionOptimized(ctx, keyHash, sessionID)
+	// Always mark in Redis for compatibility (ReadySessions fallback path).
+	redisErr := s.redis.MarkSessionOptimized(ctx, keyHash, sessionID)
+	if s.pg != nil {
+		if pgErr := s.pg.MarkSessionOptimized(ctx, keyHash, sessionID); pgErr != nil {
+			s.log.Warnf("layered: pg MarkSessionOptimized session=%s: %v", sessionID, pgErr)
+		}
+	}
+	return redisErr
+}
+
+func (s *Store) MarkFeedbackUsed(ctx context.Context, keyHash string, sessionID string, conversationIDs []string) error {
+
+	if s.pg != nil {
+		if pgErr := s.pg.MarkFeedbackUsed(ctx, keyHash, sessionID, conversationIDs); pgErr != nil {
+			s.log.Warnf("layered: pg MarkFeedbackUsed session=%s: %v", sessionID, pgErr)
+			return pgErr
+		}
+	}
+
+	return s.redis.MarkFeedbackUsed(ctx, keyHash, sessionID, conversationIDs)
 }
 
 var _ store.Store = (*Store)(nil)

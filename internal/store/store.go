@@ -64,6 +64,15 @@ type SessionRef struct {
 	SessionID string
 }
 
+type ConversationLog struct {
+	KeyHash        string
+	SessionID      string
+	ConversationID string
+	VariantID      string
+	Prompt         string
+	ResponseText   string
+}
+
 type Store interface {
 	GetVariant(ctx context.Context, keyHash, sessionID string) (*VariantSet, error)
 	SetVariants(ctx context.Context, keyHash, sessionID string, variants []Variant, ttl time.Duration) error
@@ -83,6 +92,7 @@ type Store interface {
 	UpdateBestPrompt(ctx context.Context, keyHash, sessionID string, best BestPrompt) error
 	AppendHistory(ctx context.Context, keyHash, sessionID string, entry HistoryEntry) error
 	MarkSessionOptimized(ctx context.Context, keyHash, sessionID string) error
+	MarkFeedbackUsed(ctx context.Context, keyHash, sessionID string, conversationIDs []string) error
 
 	LoadConversationSamples(ctx context.Context, keyHash, sessionID string, perVariant int) ([]ConversationFeedback, error)
 	RollupConversationFeedback(ctx context.Context, keyHash, sessionID string) error

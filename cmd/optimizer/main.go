@@ -38,13 +38,13 @@ func main() {
 			if migrateErr := pgClient.Migrate(context.Background()); migrateErr != nil {
 				log.Warnf("postgres migration failed: %v", migrateErr)
 			} else {
-				pgStore = pgstore.NewStore(pgClient)
+				pgStore = pgstore.NewStore(pgClient, log)
 				log.Infof("optimizer: postgres connected")
 			}
 		}
 	}
 
-	st := layeredstore.New(rstore, pgStore, log)
+	st := layeredstore.New(rstore, pgStore, log, cfg)
 	llm := gepa.NewLLMClient(cfg)
 	driver := optimizer.NewDriver(st, cfg, llm, log)
 

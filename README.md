@@ -1,4 +1,5 @@
 # Prompt Graft
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/OneSol-Technologies/prompt-graft)
 
 Prompt Graft is a Go reverse proxy that logs AI requests, injects prompt variants, and runs an asynchronous optimizer (GEPA-inspired) using user feedback. It is provider-agnostic and currently includes a Replicate adapter.
 
