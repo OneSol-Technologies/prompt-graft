@@ -48,7 +48,7 @@ type replicatePredictionRequest struct {
 
 type replicatePredictionResponse struct {
     ID     string `json:"id"`
-    Status string `json:"status"`
+    Status any    `json:"status"`
     Output any    `json:"output"`
     Error  any    `json:"error"`
 }
@@ -96,10 +96,10 @@ func (r *ReplicateClient) Complete(ctx context.Context, systemPrompt, userPrompt
         return "", err
     }
 
-    if prediction.Status == "succeeded" {
+    if statusString(prediction.Status) == "succeeded" {
         return normalizeOutput(prediction.Output), nil
     }
-    if prediction.Status == "failed" {
+    if statusString(prediction.Status) == "failed" {
         return "", fmt.Errorf("replicate failed: %v", prediction.Error)
     }
 
@@ -126,7 +126,7 @@ func (r *ReplicateClient) poll(ctx context.Context, id string) (string, error) {
         if err != nil {
             return "", err
         }
-        switch prediction.Status {
+        switch statusString(prediction.Status) {
         case "succeeded":
             return normalizeOutput(prediction.Output), nil
         case "failed":
@@ -144,10 +144,39 @@ func (r *ReplicateClient) client() *http.Client {
     return r.httpClient
 }
 
+func statusString(s any) string {
+    switch v := s.(type) {
+    case string:
+        return v
+    case float64:
+        n := int(v)
+        fmt.Printf("DEBUG replicate status as number: %d\n", n)
+        switch n {
+        case 1: return "starting"
+        case 2: return "processing"
+        case 3: return "succeeded"
+        case 4: return "failed"
+        case 5: return "canceled"
+        default: return fmt.Sprintf("unknown_%d", n)
+        }
+    default:
+        fmt.Printf("DEBUG replicate status unexpected type=%T value=%v\n", s, s)
+        return fmt.Sprintf("unknown_%v", s)
+    }
+}
+
 func decodePrediction(reader io.Reader) (*replicatePredictionResponse, error) {
+    raw, err := io.ReadAll(reader)
+    if err != nil {
+        return nil, fmt.Errorf("read response: %w", err)
+    }
     var resp replicatePredictionResponse
-    if err := json.NewDecoder(reader).Decode(&resp); err != nil {
-        return nil, err
+    if err := json.Unmarshal(raw, &resp); err != nil {
+        snippet := string(raw)
+        if len(snippet) > 500 {
+            snippet = snippet[:500]
+        }
+        return nil, fmt.Errorf("decode %q: %w", snippet, err)
     }
     return &resp, nil
 }

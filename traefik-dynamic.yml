@@ -1,0 +1,51 @@
+http:
+  routers:
+    api:
+      rule: "PathPrefix(`/api`)"
+      service: api-service
+      middlewares:
+        - strip-api
+
+    api-health:
+      rule: "Path(`/api/health`)"
+      service: api-service
+      middlewares:
+        - strip-api
+
+    proxy:
+      rule: "PathPrefix(`/proxy`)"
+      service: proxy-service
+      middlewares:
+        - strip-proxy
+
+    proxy-health:
+      rule: "Path(`/proxy/health`)"
+      service: proxy-service
+      middlewares:
+        - strip-proxy
+
+    static:
+      rule: "PathPrefix(`/`) && !PathPrefix(`/api`) && !PathPrefix(`/proxy`)"
+      service: api-service
+
+  services:
+    api-service:
+      loadBalancer:
+        servers:
+          - url: "http://api:3001"
+
+    proxy-service:
+      loadBalancer:
+        servers:
+          - url: "http://proxy:8080"
+
+  middlewares:
+    strip-api:
+      stripPrefix:
+        prefixes:
+          - "/api"
+
+    strip-proxy:
+      stripPrefix:
+        prefixes:
+          - "/proxy"

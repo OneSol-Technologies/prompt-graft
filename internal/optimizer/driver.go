@@ -167,6 +167,10 @@ func buildAnalysisPrompt(samples []store.ConversationFeedback) string {
 		}
 		b.WriteString("\\nSCORE: ")
 		b.WriteString(intToString(s.Score))
+		if s.Comment != "" {
+			b.WriteString("\\nUSER COMMENT: ")
+			b.WriteString(s.Comment)
+		}
 		b.WriteString("\\n\\n")
 	}
 	b.WriteString("Summarize what works and what to improve. Return bullet points.")

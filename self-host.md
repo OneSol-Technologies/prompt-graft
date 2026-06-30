@@ -215,6 +215,19 @@ curl -X POST http://localhost:3001/feedback/my-session-1 \
 Pass the `X-PG-Conversation-Id` and `X-PG-Variant-Id` values from the proxy response headers
 so the feedback is attributed to the exact conversation and variant that produced it.
 
+Optionally include a `comment` field with free-text rationale. Comments are stored in both
+Redis and Postgres, and fed into the optimizer's LLM analysis prompts so the optimizer
+understands *why* users voted the way they did:
+
+```bash
+curl -X POST http://localhost:3001/feedback/my-session-1 \
+  -H "Authorization: Bearer $YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "X-PG-Conversation-Id: a3f8c1d2e4b5..." \
+  -H "X-PG-Variant-Id: 7e9a2b1c..." \
+  -d '{"rating": -1, "comment": "The response was too verbose and lacked actionable steps"}'
+```
+
 **What happens with the feedback:**
 - Immediately written to Redis (fast scan counters for the optimizer).
 - Immediately written to Postgres (`feedback_events` table, permanent record).

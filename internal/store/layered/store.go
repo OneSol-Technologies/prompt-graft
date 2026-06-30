@@ -131,11 +131,11 @@ func (s *Store) SetSessionPrompt(ctx context.Context, keyHash, sessionID, prompt
 // Feedback — write: Redis + Postgres; reads: Redis only.
 // ---------------------------------------------------------------------------
 
-func (s *Store) RecordFeedback(ctx context.Context, keyHash, sessionID, conversationID, variantID string, rating int) error {
-	err := s.redis.RecordFeedback(ctx, keyHash, sessionID, conversationID, variantID, rating)
+func (s *Store) RecordFeedback(ctx context.Context, keyHash, sessionID, conversationID, variantID string, rating int, comment string) error {
+	err := s.redis.RecordFeedback(ctx, keyHash, sessionID, conversationID, variantID, rating, comment)
 
 	if s.pg != nil && conversationID != "" {
-		if pgErr := s.pg.RecordFeedback(ctx, keyHash, sessionID, conversationID, variantID, rating); pgErr != nil {
+		if pgErr := s.pg.RecordFeedback(ctx, keyHash, sessionID, conversationID, variantID, rating, comment); pgErr != nil {
 			s.log.Warnf("layered: pg RecordFeedback: %v", pgErr)
 		}
 	}

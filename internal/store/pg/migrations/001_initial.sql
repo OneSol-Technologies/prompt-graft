@@ -36,6 +36,8 @@ CREATE INDEX IF NOT EXISTS idx_feedback_session
 CREATE INDEX IF NOT EXISTS idx_feedback_created
     ON feedback_events (created_at);
 
+ALTER TABLE feedback_events ADD COLUMN IF NOT EXISTS comment TEXT;
+
 -- Inferred prompt template per session (common prefix of all seen prompts).
 CREATE TABLE IF NOT EXISTS session_prompts (
     key_hash    TEXT        NOT NULL,

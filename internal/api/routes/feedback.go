@@ -9,7 +9,8 @@ import (
 )
 
 type feedbackRequest struct {
-    Rating int `json:"rating"`
+	Rating  int    `json:"rating"`
+	Comment string `json:"comment,omitempty"`
 }
 
 type okResponse struct {
@@ -47,7 +48,7 @@ func (h *Handler) handleFeedback(w http.ResponseWriter, r *http.Request) {
         }
     }
 
-    if err := h.store.RecordFeedback(r.Context(), keyHash, sessionID, conversationID, variantID, req.Rating); err != nil {
+	if err := h.store.RecordFeedback(r.Context(), keyHash, sessionID, conversationID, variantID, req.Rating, req.Comment); err != nil {
         http.Error(w, "failed", http.StatusInternalServerError)
         return
     }

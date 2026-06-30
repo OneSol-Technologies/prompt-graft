@@ -12,7 +12,7 @@ import (
 	"promptguru/internal/store"
 )
 
-func (s *Store) RecordFeedback(ctx context.Context, keyHash, sessionID, conversationID, variantID string, rating int) error {
+func (s *Store) RecordFeedback(ctx context.Context, keyHash, sessionID, conversationID, variantID string, rating int, comment string) error {
 	if conversationID == "" {
 		return nil
 	}
@@ -25,6 +25,9 @@ func (s *Store) RecordFeedback(ctx context.Context, keyHash, sessionID, conversa
 	}
 	pipe.HSet(ctx, key, "variantId", variantID)
 	pipe.HSet(ctx, key, "lastUpdated", time.Now().Unix())
+	if comment != "" {
+		pipe.HSet(ctx, key, "comment", comment)
+	}
 	pipe.Expire(ctx, key, 90*24*time.Hour)
 
 	skey := store.KeySessionFeedback(keyHash, sessionID)
@@ -206,12 +209,18 @@ func (s *Store) datasetFromSession(ctx context.Context, keyHash, sessionID strin
 				resp = entry.ResponseSnippet
 			}
 			rating := 0.0
-			if variantID != "" {
-				summary, _ := s.GetVariantFeedback(ctx, keyHash, sessionID, variantID)
-				if summary.Up > summary.Down {
-					rating = 1
-				} else if summary.Down > summary.Up {
-					rating = -1
+			userComment := ""
+			if conversationID != "" {
+				ckey := store.KeyConversationFeedback(keyHash, sessionID, conversationID)
+				if vals, err := s.redis().HGetAll(ctx, ckey).Result(); err == nil {
+					up := parseInt64(vals["up"])
+					down := parseInt64(vals["down"])
+					if up > down {
+						rating = 1
+					} else if down > up {
+						rating = -1
+					}
+					userComment = vals["comment"]
 				}
 			}
 			if reqPrompt != "" || resp != "" {
@@ -220,7 +229,7 @@ func (s *Store) datasetFromSession(ctx context.Context, keyHash, sessionID strin
 					Output:    resp,
 					Rating:    rating,
 					VariantID: variantID,
-					ASI:       conversationID,
+					Comment:   userComment,
 				})
 			}
 			reqPrompt = ""
@@ -325,6 +334,9 @@ func (s *Store) LoadConversationSamples(ctx context.Context, keyHash, sessionID 
 			cf.Score = score
 			if cf.VariantID == "" {
 				cf.VariantID = vals["variantId"]
+			}
+			if cf.Comment == "" {
+				cf.Comment = vals["comment"]
 			}
 			variantID := cf.VariantID
 			variantBuckets[variantID] = append(variantBuckets[variantID], *cf)

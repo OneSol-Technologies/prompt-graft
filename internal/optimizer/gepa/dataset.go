@@ -6,11 +6,12 @@ import (
 
 // DataPoint is one training example.
 type DataPoint struct {
-    Input     string
-    Output    string
-    Rating    float64
-    ASI       string
-    VariantID string
+	Input     string
+	Output    string
+	Rating    float64
+	ASI       string
+	VariantID string
+	Comment   string // user-provided rationale for the rating
 }
 
 type Dataset []DataPoint

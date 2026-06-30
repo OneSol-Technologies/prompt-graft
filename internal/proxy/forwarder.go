@@ -33,9 +33,9 @@ func (f *Forwarder) Forward(ctx context.Context, r *http.Request, body io.Reader
     upstreamURL := strings.TrimSpace(r.Header.Get("X-PG-Upstream-Url"))
     upstreamHost := r.Header.Get("X-PG-Upstream-Host")
     scheme := r.Header.Get("X-PG-Upstream-Scheme")
+    upstreamAuth := r.Header.Get("X-PG-Auth")
 
     if upstreamURL != "" {
-        // If a full URL is provided, use it as-is.
         target, err := url.Parse(upstreamURL)
         if err != nil {
             return nil, err
@@ -48,6 +48,7 @@ func (f *Forwarder) Forward(ctx context.Context, r *http.Request, body io.Reader
             return nil, err
         }
         copyHeaders(req.Header, r.Header)
+        applyUpstreamAuth(req.Header, upstreamAuth)
         req.Host = target.Host
         if f.log != nil {
             f.log.Debugf("forwarder request method=%s url=%s headers=%s", r.Method, target.String(), safeHeaderDump(req.Header))
@@ -78,6 +79,7 @@ func (f *Forwarder) Forward(ctx context.Context, r *http.Request, body io.Reader
     }
 
     copyHeaders(req.Header, r.Header)
+    applyUpstreamAuth(req.Header, upstreamAuth)
     req.Host = upstreamHost
 
     if f.log != nil {
@@ -87,10 +89,23 @@ func (f *Forwarder) Forward(ctx context.Context, r *http.Request, body io.Reader
     return f.client.Do(req)
 }
 
-// copyHeaders copies all headers except Host from src to dst.
+// applyUpstreamAuth replaces the Authorization header with the upstream credential
+// supplied via X-PG-Auth, since the inbound Authorization is for PromptGuru itself,
+// not the upstream provider. If X-PG-Auth is absent, Authorization is stripped
+// entirely so the inbound service token never leaks upstream.
+func applyUpstreamAuth(dst http.Header, upstreamAuth string) {
+    dst.Del("Authorization")
+    upstreamAuth = strings.TrimSpace(upstreamAuth)
+    if upstreamAuth == "" {
+        return
+    }
+    dst.Set("Authorization", upstreamAuth)
+}
+
+// copyHeaders copies all headers except Host and PromptGuru control headers from src to dst.
 func copyHeaders(dst, src http.Header) {
     for k, vals := range src {
-        if strings.EqualFold(k, "Host") {
+        if strings.EqualFold(k, "Host") || strings.HasPrefix(strings.ToUpper(k), "X-PG-") {
             continue
         }
         dst.Del(k)

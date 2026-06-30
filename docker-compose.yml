@@ -32,13 +32,12 @@ services:
       PG_DATABASE_URL: ${PG_DATABASE_URL}
       PG_API_KEY_SALT: ${PG_API_KEY_SALT}
       PG_LOG_LEVEL: ${PG_LOG_LEVEL}
+      PG_AUTH_TOKEN: ${PG_AUTH_TOKEN}
       PG_DEFAULT_UPSTREAM_HOST: api.replicate.com
       PG_DEFAULT_UPSTREAM_SCHEME: https
       PG_REQUEST_TIMEOUT: ${PG_REQUEST_TIMEOUT}
       PG_REDIS_TIMEOUT: ${PG_REDIS_TIMEOUT}
       PG_FORWARD_PASS_TIMEOUT: ${PG_FORWARD_PASS_TIMEOUT}
-    ports:
-      - "8080:8080"
     depends_on:
       redis:
         condition: service_healthy
@@ -53,8 +52,10 @@ services:
       PG_DATABASE_URL: ${PG_DATABASE_URL}
       PG_API_KEY_SALT: ${PG_API_KEY_SALT}
       PG_LOG_LEVEL: ${PG_LOG_LEVEL}
-    ports:
-      - "3001:3001"
+      PG_AUTH_TOKEN: ${PG_AUTH_TOKEN}
+      PG_STUDIO_PASSWORD: ${PG_STUDIO_PASSWORD}
+    volumes:
+      - ./studio-chat.html:/app/studio-chat.html:ro
     depends_on:
       redis:
         condition: service_healthy
@@ -86,3 +87,16 @@ services:
         condition: service_healthy
       db:
         condition: service_healthy
+
+  traefik:
+    image: traefik:v3.0
+    ports:
+      - "${PG_TRAEFIK_PORT:-8091}:80"
+    volumes:
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik-dynamic.yml:/etc/traefik/dynamic.yml:ro
+    depends_on:
+      proxy:
+        condition: service_started
+      api:
+        condition: service_started

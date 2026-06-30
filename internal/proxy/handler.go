@@ -36,6 +36,20 @@ func NewHandler(cfg *config.Config, st store.Store, reg *provider.Registry, styl
 
 // ServeHTTP handles a single proxy request: buffer/stream body, optionally inject variant prompt, forward upstream, stream response, and log.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/health" || r.URL.Path == "/" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"service":"proxy","status":"ok"}`))
+		return
+	}
+
+	if h.cfg.AuthToken != "" && !validBearerToken(r.Header.Get("Authorization"), h.cfg.AuthToken) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":"unauthorized"}`))
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), h.cfg.RequestTimeout)
 	defer cancel()
 
@@ -140,6 +154,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if h.store != nil {
 		go h.store.LogRequest(context.Background(), keyHash, sessionID, variantID, conversationID, r.Header.Get("Content-Type"), promptSnippet, prompt, promptOriginal, buffered)
+	}
+
+	// Set upstream auth via control header so the forwarder can inject it
+	// without leaking the inbound service token upstream.
+	// If the client already sent X-PG-Auth, respect it; otherwise fall back
+	// to the server-configured Replicate token.
+	if r.Header.Get("X-PG-Auth") == "" && h.cfg.ReplicateAPIToken != "" {
+		r.Header.Set("X-PG-Auth", "Bearer "+h.cfg.ReplicateAPIToken)
 	}
 
 	var reqBody io.Reader = bytes.NewReader(injectedBody)
@@ -357,4 +379,11 @@ func truncateString(s string, max int) string {
 		return s
 	}
 	return s[:max]
+}
+
+func validBearerToken(header, expected string) bool {
+	if !strings.HasPrefix(header, "Bearer ") {
+		return false
+	}
+	return strings.TrimSpace(header[len("Bearer "):]) == expected
 }

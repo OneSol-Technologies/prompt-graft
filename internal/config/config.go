@@ -47,6 +47,9 @@ type Config struct {
 	APIAddr string
 
 	APIKeySalt string
+	AuthToken  string
+
+	StudioPassword string
 
 	DefaultUpstreamHost   string
 	DefaultUpstreamScheme string
@@ -94,6 +97,9 @@ func Load() *Config {
 		APIAddr: getEnv("PG_API_ADDR", ":3001"),
 
 		APIKeySalt: getEnv("PG_API_KEY_SALT", ""),
+		AuthToken:  getEnv("PG_AUTH_TOKEN", ""),
+
+		StudioPassword: getEnv("PG_STUDIO_PASSWORD", ""),
 
 		DefaultUpstreamHost:   getEnv("PG_DEFAULT_UPSTREAM_HOST", ""),
 		DefaultUpstreamScheme: getEnv("PG_DEFAULT_UPSTREAM_SCHEME", "https"),

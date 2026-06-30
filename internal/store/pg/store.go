@@ -178,11 +178,11 @@ func (s *Store) FindUnusedVariantSessions(ctx context.Context, unusedTTL time.Du
 // ---------------------------------------------------------------------------
 
 // RecordFeedback appends a durable feedback event row.
-func (s *Store) RecordFeedback(ctx context.Context, keyHash, sessionID, conversationID, variantID string, rating int) error {
+func (s *Store) RecordFeedback(ctx context.Context, keyHash, sessionID, conversationID, variantID string, rating int, comment string) error {
 	_, err := s.client.pool.Exec(ctx,
-		`INSERT INTO feedback_events (key_hash, session_id, conversation_id, variant_id, rating)
-		 VALUES ($1, $2, $3, $4, $5)`,
-		keyHash, sessionID, conversationID, variantID, rating,
+		`INSERT INTO feedback_events (key_hash, session_id, conversation_id, variant_id, rating, comment)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		keyHash, sessionID, conversationID, variantID, rating, nilIfEmpty(comment),
 	)
 	return err
 }
@@ -351,7 +351,8 @@ func (s *Store) LoadConversationSamples(ctx context.Context, keyHash, sessionID 
 		        cl.prompt,
 		        cl.response_text,
 		        COALESCE(SUM(CASE WHEN fe.rating > 0 THEN 1 ELSE 0 END), 0) AS up,
-		        COALESCE(SUM(CASE WHEN fe.rating < 0 THEN 1 ELSE 0 END), 0) AS down
+		        COALESCE(SUM(CASE WHEN fe.rating < 0 THEN 1 ELSE 0 END), 0) AS down,
+		        COALESCE(fe.comment, '')                                     AS comment
 		 FROM conversation_logs cl
 		 LEFT JOIN feedback_events fe
 		   ON fe.key_hash        = cl.key_hash
@@ -362,7 +363,7 @@ func (s *Store) LoadConversationSamples(ctx context.Context, keyHash, sessionID 
 		   AND cl.prompt        IS NOT NULL
 		   AND cl.response_text IS NOT NULL
 		   AND fe.times_used = 0 -- only consider feedback that hasn't been used for optimization yet
-		 GROUP BY cl.conversation_id, cl.variant_id, cl.prompt, cl.response_text
+		 GROUP BY cl.conversation_id, cl.variant_id, cl.prompt, cl.response_text, fe.comment
 		 ORDER BY cl.conversation_id`,
 		keyHash, sessionID,
 	)
@@ -375,7 +376,7 @@ func (s *Store) LoadConversationSamples(ctx context.Context, keyHash, sessionID 
 	for rows.Next() {
 		var cf store.ConversationFeedback
 		var up, down int64
-		if err := rows.Scan(&cf.ConversationID, &cf.VariantID, &cf.Prompt, &cf.Response, &up, &down); err != nil {
+		if err := rows.Scan(&cf.ConversationID, &cf.VariantID, &cf.Prompt, &cf.Response, &up, &down, &cf.Comment); err != nil {
 			return nil, err
 		}
 		if up > down {

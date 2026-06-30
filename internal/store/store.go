@@ -42,6 +42,7 @@ type ConversationFeedback struct {
 	Score          int
 	Prompt         string
 	Response       string
+	Comment        string // user-provided rationale for the rating
 }
 
 type SessionInfo struct {
@@ -81,7 +82,7 @@ type Store interface {
 	LogRequest(ctx context.Context, keyHash, sessionID, variantID, conversationID, contentType, promptSnippet, prompt, promptOriginal string, body []byte) error
 	LogResponse(ctx context.Context, keyHash, sessionID, variantID, conversationID, contentType, responseText string, body []byte) error
 
-	RecordFeedback(ctx context.Context, keyHash, sessionID, conversationID, variantID string, rating int) error
+	RecordFeedback(ctx context.Context, keyHash, sessionID, conversationID, variantID string, rating int, comment string) error
 	GetSessionInfo(ctx context.Context, keyHash, sessionID string) (*SessionInfo, error)
 	GetVariantsInfo(ctx context.Context, keyHash, sessionID string) (*VariantsInfo, error)
 	GetVariantFeedback(ctx context.Context, keyHash, sessionID, variantID string) (FeedbackSummary, error)

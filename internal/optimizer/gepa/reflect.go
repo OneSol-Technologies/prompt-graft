@@ -83,11 +83,15 @@ func buildReflectionPrompt(parent string, minibatch Dataset, scores []float64) s
         } else {
             b.WriteString("\nScore: 0.000\n")
         }
-        if item.ASI != "" {
-            b.WriteString("UserFeedback:\n")
-            b.WriteString(item.ASI)
-            b.WriteString("\n")
-        }
+		if item.Comment != "" {
+			b.WriteString("UserFeedback:\n")
+			b.WriteString(item.Comment)
+			b.WriteString("\n")
+		} else if item.ASI != "" {
+			b.WriteString("UserFeedback:\n")
+			b.WriteString(item.ASI)
+			b.WriteString("\n")
+		}
         b.WriteString("\n")
     }
     b.WriteString("Analyze why the prompt is failing on the low-scoring examples. Identify specific patterns in the failures. Provide a concise natural-language diagnosis (ASI) and concrete suggestions for improving the prompt. Be specific and cite failure modes.\n")
