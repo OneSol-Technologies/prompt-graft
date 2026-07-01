@@ -1,4 +1,5 @@
 AGENTS.md
 .env
+.env.local
 studio.html
 studio-chat-private.html
